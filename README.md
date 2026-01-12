@@ -133,18 +133,14 @@ This discrepancy is CRYPTOGRAPHICALLY PROVABLE.
 vcp-payout-dispute-poc/
 ├── README.md                    # This file
 ├── LICENSE                      # CC-BY-4.0
+├── requirements.txt             # Dependencies (standard library only)
 ├── evidence/
 │   ├── trader_events.jsonl      # 24 trader-side VCP events
-│   ├── propfirm_events.jsonl    # 24 prop firm-side VCP events
-│   └── propfirm_tampered.jsonl  # Tampered version for demo
+│   └── propfirm_events.jsonl    # 24 prop firm-side VCP events
 ├── verifier/
-│   ├── verify.py                # Main verification CLI
-│   ├── vcp_validator.py         # VCP hash chain validator
-│   ├── xref_matcher.py          # Cross-reference matcher
-│   └── merkle.py                # RFC 6962 Merkle tree
+│   └── verify.py                # Main verification CLI (all-in-one)
 ├── scripts/
-│   ├── generate_events.py       # Generate sample events
-│   └── tamper_demo.py           # Create tampered version
+│   └── tamper_demo.py           # Create tampered version for demo
 └── docs/
     └── architecture.md          # Detailed architecture
 ```

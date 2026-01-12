@@ -1,0 +1,22 @@
+# VCP Payout Dispute PoC - Requirements
+# =====================================
+# 
+# The core verification tool has NO external dependencies.
+# It uses only Python standard library.
+#
+# Optional dependencies for enhanced features:
+
+# For colored output on Windows (optional)
+# colorama>=0.4.6
+
+# For JSON schema validation (optional)
+# jsonschema>=4.20.0
+
+# For performance testing (optional)
+# pytest>=7.4.0
+# pytest-benchmark>=4.0.0
+
+# For development
+# black>=23.0.0
+# flake8>=6.0.0
+# mypy>=1.0.0
