@@ -717,7 +717,7 @@ def print_result(result: VerificationResult, verbose: bool = False):
   • Cross-references matched:         {Colors.GREEN}VALID{Colors.END}
   • No critical discrepancies:        {Colors.GREEN}VALID{Colors.END}
 
-{Colors.BOLD}This verification is MATHEMATICALLY PROVABLE per VCP v1.1.{Colors.END}
+{Colors.BOLD}PoC check: internal consistency only (demo signatures, synthetic anchor proof).{Colors.END}
 """)
     else:
         print(f"""
@@ -728,7 +728,7 @@ Issues detected:
   • Merkle tree failures:   {int(not result.trader_merkle_valid) + int(not result.propfirm_merkle_valid)}
   • Critical discrepancies: {len(critical)}
 
-{Colors.BOLD}These issues are CRYPTOGRAPHICALLY PROVABLE per VCP v1.1.{Colors.END}
+{Colors.BOLD}These issues are detectable by the checks above (PoC; demo signatures).{Colors.END}
 {Colors.BOLD}Manipulation requires collusion between BOTH parties.{Colors.END}
 """)
 

@@ -235,8 +235,7 @@ The VCP v1.1 verifier will detect:
      - Trader logged:   {original_price}
      - PropFirm logged: {new_price}
 
-{Colors.BOLD}These discrepancies are CRYPTOGRAPHICALLY PROVABLE per VCP v1.1.{Colors.END}
-{Colors.BOLD}The trader's log provides NON-REPUDIABLE EVIDENCE.{Colors.END}
+{Colors.BOLD}These discrepancies are detectable by the checks above (PoC; demo signatures).{Colors.END}
 {Colors.BOLD}Manipulation requires collusion between BOTH parties AND anchor compromise.{Colors.END}
 """)
 

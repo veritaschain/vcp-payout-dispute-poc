@@ -1,3 +1,11 @@
+> **Status correction — 25 October 2026**
+>
+> - This is first-party proof-of-concept code by VeritasChain Co., Ltd., which operates the VeritasChain Standards Organization (VSO). It targets VCP v1.1. VCP v1.1 has no tagged release and is superseded by VCP v1.2 (Released, tag `v1.2.0`).
+> - Conformance to any VCP tier, or to VAP, has not been independently established. There are zero external implementations of VAP or any of its profiles, including VCP.
+> - Not certified. VSO does not issue certificates. The certification scheme requires a Conformity Assessment Body (CAB) independent of the scheme owner; the only registered CAB, VeritasChain Co., Ltd., is not independent (VAP v1.2 ERRATA E-2026-10-21).
+> - Known limitations: signatures come from an Ed25519 *simulator* in `scripts/generate_events_v1_1.py` (a SHA-512 construction its own docstring calls "NOT cryptographically secure - demo only"); `verify.py` re-checks that construction, not Ed25519. The anchor "proof" is a synthetic string (`ots-` plus a truncated SHA-256 of the root and timestamp); nothing is submitted to OpenTimestamps. `verify.py` checks the anchor by comparing the anchor record's `merkle_root` string with the events' `merkle_root`; it does not verify an anchor signature or proof. The Merkle tree pads to a power of two by duplicating the last leaf (RFC 6962 hash prefixes, not the RFC 6962 tree algorithm). The generated event IDs are not valid UUIDs.
+> - The results below show internal consistency of the sample logs. They are not proof of what was traded, and they do not settle disputes on their own.
+
 # VCP v1.1 Payout Dispute Resolution PoC
 
 > **"When payout disputes happen, CSV logs are not evidence. Dual cryptographic logs are."**
@@ -79,11 +87,11 @@ Every year, thousands of prop firm traders lose payouts to disputes they cannot 
                   └─────────────────────┘
 ```
 
-**Guarantee**: Unless both parties collude AND compromise external anchors, any discrepancy is detectable and provable.
+**Property (design goal)**: Unless both parties collude AND compromise external anchors, a discrepancy between the two logs is detectable. In this PoC the anchors are simulated (see the status correction above).
 
 ## 3-Minute Quick Start
 
-### 1. Generate VCP v1.1 Compliant Events
+### 1. Generate VCP v1.1 PoC Events
 
 ```bash
 python scripts/generate_events_v1_1.py
@@ -120,7 +128,7 @@ Layer 3: External Verifiability
 VCP-XREF: Cross-Reference Verification
   ✓ NO DISCREPANCIES DETECTED
 
-This verification is MATHEMATICALLY PROVABLE per VCP v1.1.
+PoC check: internal consistency only (demo signatures, synthetic anchor proof).
 ```
 
 ### 3. Demonstrate Tamper Detection
@@ -147,7 +155,7 @@ Layer 1: Event Integrity
       ├─ Trader:   2658.20
       └─ PropFirm: 2655.50
 
-These issues are CRYPTOGRAPHICALLY PROVABLE per VCP v1.1.
+These issues are detectable by the checks above (PoC; demo signatures).
 ```
 
 ## Repository Structure
@@ -164,29 +172,29 @@ vcp-payout-dispute-poc/
 ├── verifier/
 │   └── verify.py                       # VCP v1.1 Three-Layer verification
 ├── scripts/
-│   ├── generate_events_v1_1.py         # Generate VCP v1.1 compliant events
+│   ├── generate_events_v1_1.py         # Generate VCP v1.1 PoC events
 │   └── tamper_demo.py                  # Demonstrate tamper detection
 └── docs/
     └── architecture.md                 # Detailed architecture
 ```
 
-## VCP v1.1 Compliance
+## VCP v1.1 Design Targets (not conformance results)
 
-This PoC implements the following VCP v1.1 requirements:
+This PoC addresses the following VCP v1.1 requirements. See the status correction above for limitations:
 
 | Requirement | Status | Reference |
 |-------------|--------|-----------|
 | **Three-Layer Architecture** | ✅ | Section 6.0 |
 | **EventHash (SHA-256)** | ✅ | Section 6.1.1 |
 | **PrevHash (optional)** | ✅ | Section 6.1.2 |
-| **Merkle Tree (RFC 6962)** | ✅ | Section 6.2.1 |
+| **Merkle Tree (RFC 6962)** | Partial: RFC 6962 hash prefixes; pads by duplicating the last leaf | Section 6.2.1 |
 | **Merkle Proof** | ✅ | Section 6.2.3 |
-| **Digital Signatures** | ✅ | Section 6.3.1 |
-| **External Anchor** | ✅ | Section 6.3.3 |
+| **Digital Signatures** | Simulated (not Ed25519; demo only) | Section 6.3.1 |
+| **External Anchor** | Simulated (synthetic proof string; not submitted) | Section 6.3.3 |
 | **Policy Identification** | ✅ | Section 5.5 |
 | **VCP-XREF Dual Logging** | ✅ | Section 5.6 |
-| **UUIDv7 Event IDs** | ✅ | RFC 9562 |
-| **JSON Canonicalization** | ✅ | RFC 8785 |
+| **UUIDv7 Event IDs** | ✗ Generated IDs are not valid UUIDs (last group has 8 hex digits, not 12) | RFC 9562 |
+| **JSON Canonicalization** | Simplified (sorted-key JSON; not a full RFC 8785 implementation) | RFC 8785 |
 
 ### Event Structure (VCP v1.1)
 
@@ -235,14 +243,13 @@ This PoC implements the following VCP v1.1 requirements:
 | Trader claims execution at $X | "Trust us, it was $Y" | Three-layer cryptographic proof shows $X |
 | Drawdown dispute | CSV can be edited | Merkle tree proves timeline integrity |
 | Missing trade | "No record in our system" | CrossReferenceID + anchor proves existence |
-| Payout denial | Months of email disputes | Mathematical verification in seconds |
+| Payout denial | Months of email disputes | Record verification in seconds |
 
 ## For Prop Firms: Why Adopt This?
 
-1. **End disputes permanently** - Mathematical proof replaces "he said, she said"
-2. **Reduce legal costs** - Disputes resolve in seconds, not months
-3. **Build trader trust** - "VC-Certified" badge signals transparency
-4. **Regulatory readiness** - MiFID II, EU AI Act compliance preparation
+1. **Shorten disputes** - Verifiable records replace "he said, she said"
+2. **Reduce legal costs** - Record checks take seconds, not months
+3. **Regulatory readiness** - MiFID II, EU AI Act preparation (compliance not determined)
 
 ## For Traders: Protect Yourself
 

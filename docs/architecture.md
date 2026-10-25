@@ -3,11 +3,11 @@
 **Document ID**: VSO-POC-ARCH-002  
 **Version**: 1.1  
 **Date**: 2025-01-12  
-**Status**: Production Ready
+**Status**: PoC (status corrected 2026-10-25; see the README)
 
 ## 1. Executive Summary
 
-This document describes the architecture of the VCP v1.1 Payout Dispute Resolution Proof of Concept. The PoC demonstrates how the VeritasChain Protocol v1.1 Three-Layer Architecture provides cryptographically provable evidence for resolving trading disputes between traders and prop firms.
+This document describes the architecture of the VCP v1.1 Payout Dispute Resolution Proof of Concept. The PoC demonstrates how the VeritasChain Protocol v1.1 Three-Layer Architecture provides cryptographically verifiable records for resolving trading disputes between traders and prop firms.
 
 ## 2. VCP v1.1 Three-Layer Architecture
 
@@ -87,7 +87,7 @@ VCP-XREF enables **Dual Logging**—independent VCP event streams from multiple 
                   │   Verification      │
                   └─────────────────────┘
 
-Guarantee: Unless both parties collude, 
+Property:  Unless both parties collude, 
            omission or modification by one party 
            is detectable by the other.
 ```
@@ -450,7 +450,7 @@ scripts/
 
 ---
 
-**Document Status**: Production Ready  
+**Document Status**: PoC  
 **Last Updated**: 2025-01-12  
 **Maintainer**: VeritasChain Standards Organization
 
