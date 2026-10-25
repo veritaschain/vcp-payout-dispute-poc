@@ -2,7 +2,7 @@
 >
 > - This is first-party proof-of-concept code by VeritasChain Co., Ltd., which operates the VeritasChain Standards Organization (VSO). It targets VCP v1.1. VCP v1.1 has no tagged release and is superseded by VCP v1.2 (Released, tag `v1.2.0`).
 > - Conformance to any VCP tier, or to VAP, has not been independently established. There are zero external implementations of VAP or any of its profiles, including VCP.
-> - Not certified. VSO does not issue certificates. The certification scheme requires a Conformity Assessment Body (CAB) independent of the scheme owner; the only registered CAB, VeritasChain Co., Ltd., is not independent (VAP v1.2 ERRATA E-2026-10-21).
+> - Not certified. VSO does not issue certifications itself. The certification scheme requires a Conformity Assessment Body (CAB) independent of the scheme owner; the only registered CAB, VeritasChain Co., Ltd., is not independent (VAP v1.2 ERRATA E-2026-10-21).
 > - Known limitations: signatures come from an Ed25519 *simulator* in `scripts/generate_events_v1_1.py` (a SHA-512 construction its own docstring calls "NOT cryptographically secure - demo only"); `verify.py` re-checks that construction, not Ed25519. The anchor "proof" is a synthetic string (`ots-` plus a truncated SHA-256 of the root and timestamp); nothing is submitted to OpenTimestamps. `verify.py` checks the anchor by comparing the anchor record's `merkle_root` string with the events' `merkle_root`; it does not verify an anchor signature or proof. The Merkle tree pads to a power of two by duplicating the last leaf (RFC 6962 hash prefixes, not the RFC 6962 tree algorithm). The generated event IDs are not valid UUIDs.
 > - The results below show internal consistency of the sample logs. They are not proof of what was traded, and they do not settle disputes on their own.
 
@@ -240,9 +240,9 @@ This PoC addresses the following VCP v1.1 requirements. See the status correctio
 
 | Scenario | Without VCP | With VCP v1.1 Dual Logging |
 |----------|-------------|---------------------------|
-| Trader claims execution at $X | "Trust us, it was $Y" | Three-layer cryptographic proof shows $X |
-| Drawdown dispute | CSV can be edited | Merkle tree proves timeline integrity |
-| Missing trade | "No record in our system" | CrossReferenceID + anchor proves existence |
+| Trader claims execution at $X | "Trust us, it was $Y" | Signed, Merkle-batched records show $X (demo signatures in this PoC) |
+| Drawdown dispute | CSV can be edited | Merkle tree makes later edits detectable |
+| Missing trade | "No record in our system" | CrossReferenceID + anchor records existence (anchor simulated in this PoC) |
 | Payout denial | Months of email disputes | Record verification in seconds |
 
 ## For Prop Firms: Why Adopt This?
@@ -256,7 +256,7 @@ This PoC addresses the following VCP v1.1 requirements. See the status correctio
 1. Run the VCP Sidecar alongside your trading
 2. Your logs are YOUR evidence (independently anchored)
 3. Cross-reference verification catches manipulation
-4. External anchoring proves your timeline
+4. External anchoring timestamps your log (simulated in this PoC)
 
 ## Installation
 
