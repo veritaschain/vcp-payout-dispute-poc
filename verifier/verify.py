@@ -3,15 +3,20 @@
 VCP v1.1 Payout Dispute Verification Tool
 ==========================================
 
-Cross-reference verification for dual-party VCP v1.1 compliant event logs.
-Implements full Three-Layer Architecture verification.
+Selected consistency checks for dual-party PoC sample logs targeting VCP v1.1.
+This is not a conformance, signature-authentication, or external-proof verifier.
 
 Features:
 - Layer 1: Event hash verification
-- Layer 2: Merkle tree and proof verification (RFC 6962)
-- Layer 3: Signature verification, anchor validation
+- Layer 2: Supplied paths/root consistency for the PoC padded tree
+- Layer 3: Publicly computable demo prefix checks and anchor-root metadata
 - VCP-XREF: Cross-reference matching and discrepancy detection
-- Policy Identification: Conformance tier validation
+- Policy Identification: Presence checks, not tier conformance
+
+Exit status covers event-hash failures, Merkle-check failures, and critical
+cross-reference discrepancies only. It excludes signature results, anchor
+metadata, hash-chain flags, policy checks, and warnings. JSON result names
+ending in _valid retain their legacy PoC meaning; they do not imply conformance.
 
 Usage:
     python verify.py --trader trader_events.jsonl --propfirm propfirm_events.jsonl
@@ -218,7 +223,7 @@ class VerificationResult:
 # =============================================================================
 
 def canonicalize_json(obj: Any) -> str:
-    """RFC 8785 JSON Canonicalization (simplified)"""
+    """Simplified sorted-key JSON, not a full RFC 8785 implementation."""
     return json.dumps(obj, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
 
 
@@ -246,8 +251,8 @@ def recalculate_event_hash(event: VCPEvent) -> str:
 
 def verify_signature_demo(event_hash: str, signature: str, public_key: str) -> bool:
     """
-    Verify Ed25519 signature (demo implementation).
-    In production, use a proper cryptographic library.
+    Check a publicly computable SHA-512 prefix, not an Ed25519 signature.
+    This differs from the generator and does not authenticate the event.
     """
     try:
         sig_bytes = base64.b64decode(signature)
@@ -273,7 +278,7 @@ def merkle_node_hash(left: bytes, right: bytes) -> bytes:
 
 def verify_merkle_proof(event_hash: str, merkle_root: str, 
                         merkle_index: int, proof: List[Dict]) -> bool:
-    """Verify Merkle inclusion proof per RFC 6962"""
+    """Check a supplied path using the PoC leaf and node hash prefixes."""
     try:
         current = merkle_leaf_hash(bytes.fromhex(event_hash))
         for step in proof:
@@ -396,7 +401,7 @@ def verify_layer2_collection_integrity(events: List[VCPEvent], party: str) -> Tu
 
 
 def verify_layer3_external(events: List[VCPEvent], anchor: Dict, party: str) -> Tuple[int, bool, List[VerificationIssue]]:
-    """Layer 3: Verify external verifiability"""
+    """Count demo prefix matches and compare optional anchor-root metadata."""
     issues = []
     valid_signatures = 0
     anchor_valid = True
@@ -606,7 +611,7 @@ def print_result(result: VerificationResult, verbose: bool = False):
     
     print()
     print(f"{Colors.BOLD}{'='*70}{Colors.END}")
-    print(f"{Colors.BOLD}        VCP v1.1 PAYOUT DISPUTE VERIFICATION{Colors.END}")
+    print(f"{Colors.BOLD}        VCP v1.1 PAYOUT DISPUTE PoC CHECKS{Colors.END}")
     print(f"{Colors.BOLD}{'='*70}{Colors.END}")
     print()
     
@@ -629,33 +634,35 @@ def print_result(result: VerificationResult, verbose: bool = False):
     print()
     
     # Layer 2
-    print(f"{Colors.CYAN}{Colors.BOLD}Layer 2: Collection Integrity{Colors.END}")
-    print(f"  {Colors.DIM}(Merkle Tree, RFC 6962){Colors.END}")
+    print(f"{Colors.CYAN}{Colors.BOLD}Layer 2: PoC Merkle Checks{Colors.END}")
+    print(f"  {Colors.DIM}(Supplied padded-tree paths and stored roots; missing proofs are skipped){Colors.END}")
     print()
     icon = f"{Colors.GREEN}✓{Colors.END}" if result.trader_merkle_valid else f"{Colors.RED}✗{Colors.END}"
-    print(f"  {icon} Trader Merkle tree:    {'VALID' if result.trader_merkle_valid else 'INVALID'}")
+    print(f"  {icon} Trader Merkle checks:    {'NO FAILURE REPORTED' if result.trader_merkle_valid else 'FAILED'}")
     if result.trader_merkle_root:
         print(f"      Root: {result.trader_merkle_root[:48]}...")
     icon = f"{Colors.GREEN}✓{Colors.END}" if result.propfirm_merkle_valid else f"{Colors.RED}✗{Colors.END}"
-    print(f"  {icon} PropFirm Merkle tree:  {'VALID' if result.propfirm_merkle_valid else 'INVALID'}")
+    print(f"  {icon} PropFirm Merkle checks:  {'NO FAILURE REPORTED' if result.propfirm_merkle_valid else 'FAILED'}")
     if result.propfirm_merkle_root:
         print(f"      Root: {result.propfirm_merkle_root[:48]}...")
     print()
     
     # Layer 3
-    print(f"{Colors.CYAN}{Colors.BOLD}Layer 3: External Verifiability{Colors.END}")
-    print(f"  {Colors.DIM}(Digital Signatures, External Anchor){Colors.END}")
+    print(f"{Colors.CYAN}{Colors.BOLD}Layer 3: Demo Signature / Anchor Metadata Checks{Colors.END}")
+    print(f"  {Colors.DIM}(Publicly computable prefix check; optional anchor-root comparison only){Colors.END}")
     print()
     t_sig_ok = result.trader_signatures_valid == result.trader_events
     p_sig_ok = result.propfirm_signatures_valid == result.propfirm_events
     icon = f"{Colors.GREEN}✓{Colors.END}" if t_sig_ok else f"{Colors.YELLOW}⚠{Colors.END}"
-    print(f"  {icon} Trader signatures:     {result.trader_signatures_valid}/{result.trader_events} valid")
+    print(f"  {icon} Trader demo signatures:     {result.trader_signatures_valid}/{result.trader_events} prefix matches")
     icon = f"{Colors.GREEN}✓{Colors.END}" if p_sig_ok else f"{Colors.YELLOW}⚠{Colors.END}"
-    print(f"  {icon} PropFirm signatures:   {result.propfirm_signatures_valid}/{result.propfirm_events} valid")
+    print(f"  {icon} PropFirm demo signatures:   {result.propfirm_signatures_valid}/{result.propfirm_events} prefix matches")
     icon = f"{Colors.GREEN}✓{Colors.END}" if result.trader_anchor_valid else f"{Colors.YELLOW}⚠{Colors.END}"
-    print(f"  {icon} Trader anchor:         {'VALID' if result.trader_anchor_valid else 'NOT VERIFIED'}")
+    print(f"  {icon} Trader anchor-root mismatch:   {'NOT DETECTED' if result.trader_anchor_valid else 'DETECTED'}")
     icon = f"{Colors.GREEN}✓{Colors.END}" if result.propfirm_anchor_valid else f"{Colors.YELLOW}⚠{Colors.END}"
-    print(f"  {icon} PropFirm anchor:       {'VALID' if result.propfirm_anchor_valid else 'NOT VERIFIED'}")
+    print(f"  {icon} PropFirm anchor-root mismatch: {'NOT DETECTED' if result.propfirm_anchor_valid else 'DETECTED'}")
+    print("  Missing anchor records also leave the mismatch flag unset.")
+    print("  No external signature or timestamp proof is verified.")
     print()
     
     # VCP-XREF
@@ -706,43 +713,41 @@ def print_result(result: VerificationResult, verbose: bool = False):
     
     if all_valid:
         print(f"""
-{Colors.GREEN}All verification checks PASSED.{Colors.END}
+{Colors.GREEN}No failures reported by the PoC exit-status checks.{Colors.END}
 
-{Colors.BOLD}VCP v1.1 Three-Layer Architecture:{Colors.END}
-  • Layer 1 (Event Integrity):        {Colors.GREEN}VALID{Colors.END}
-  • Layer 2 (Collection Integrity):   {Colors.GREEN}VALID{Colors.END}
-  • Layer 3 (External Verifiability): {Colors.GREEN}VALID{Colors.END}
+These checks cover event hashes, supplied Merkle paths/root consistency,
+and critical cross-reference discrepancies.
+Signature results, anchor metadata, hash-chain flags, policy checks, and warnings
+do not determine the exit status. Review the individual results above.
 
-{Colors.BOLD}VCP-XREF Dual Logging:{Colors.END}
-  • Cross-references matched:         {Colors.GREEN}VALID{Colors.END}
-  • No critical discrepancies:        {Colors.GREEN}VALID{Colors.END}
-
-{Colors.BOLD}PoC check: internal consistency only (demo signatures, synthetic anchor proof).{Colors.END}
+{Colors.BOLD}PoC result: selected consistency checks only; no signature authentication or external proof verification.{Colors.END}
 """)
     else:
         print(f"""
-{Colors.RED}Verification FAILED.{Colors.END}
+{Colors.RED}Selected PoC checks FAILED.{Colors.END}
 
 Issues detected:
   • Event hash failures:    {result.trader_hashes_invalid + result.propfirm_hashes_invalid}
-  • Merkle tree failures:   {int(not result.trader_merkle_valid) + int(not result.propfirm_merkle_valid)}
+  • Merkle check failures:  {int(not result.trader_merkle_valid) + int(not result.propfirm_merkle_valid)}
   • Critical discrepancies: {len(critical)}
 
-{Colors.BOLD}These issues are detectable by the checks above (PoC; demo signatures).{Colors.END}
-{Colors.BOLD}Manipulation requires collusion between BOTH parties.{Colors.END}
+{Colors.BOLD}These sample-log inconsistencies are detected by the selected PoC checks.{Colors.END}
+Signature results, anchor metadata, hash-chain flags, policy checks, and warnings
+do not determine the exit status. No attribution or non-repudiation is established.
 """)
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="VCP v1.1 Payout Dispute Verification Tool",
+        description="Selected checks for VCP v1.1 PoC sample logs (not conformance)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-VCP v1.1 Compliance:
-  - Three-Layer Architecture verification
-  - Policy Identification (Section 5.5)
-  - VCP-XREF Dual Logging (Section 5.6)
-  - RFC 6962 Merkle Tree verification
+PoC check scope:
+  - Event hashes and supplied paths in the padded Merkle tree
+  - Policy metadata presence and selected cross-reference fields
+  - Demo signature-prefix counts and optional anchor-root comparison
+  - No Ed25519 authentication or external timestamp-proof verification
+  - Exit status excludes signature, anchor, hash-chain, policy, and warning results
 
 Examples:
   python verify.py --trader trader.jsonl --propfirm propfirm.jsonl
@@ -754,9 +759,9 @@ For more information: https://veritaschain.org
     
     parser.add_argument('-t', '--trader', required=True, help='Trader events (JSONL)')
     parser.add_argument('-p', '--propfirm', required=True, help='PropFirm events (JSONL)')
-    parser.add_argument('-a', '--anchor', help='Anchor records (JSON, optional)')
+    parser.add_argument('-a', '--anchor', help='Synthetic anchor metadata (JSON, optional; root comparison only)')
     parser.add_argument('-v', '--verbose', action='store_true', help='Show all details')
-    parser.add_argument('--json', action='store_true', help='Output as JSON')
+    parser.add_argument('--json', action='store_true', help='Output legacy PoC result fields as JSON (not conformance)')
     
     args = parser.parse_args()
     

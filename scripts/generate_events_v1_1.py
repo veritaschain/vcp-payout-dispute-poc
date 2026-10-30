@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """
-VCP v1.1 Compliant Event Generator
+VCP v1.1 PoC Event Generator
 ===================================
 
-Generates sample VCP events that are STRICTLY compliant with VCP Specification v1.1.
+Generates illustrative sample events targeting VCP v1.1, not conformance evidence.
+Uses a SHA-512 signature simulator, synthetic anchors, malformed UUID-like IDs,
+simplified sorted-key JSON, and a padded Merkle tree. See README for limitations.
 
 Features:
 - Three-Layer Architecture (Event Integrity, Collection Integrity, External Verifiability)
 - Policy Identification (Section 5.5)
 - VCP-XREF Dual Logging (Section 5.6)
-- Merkle Tree (RFC 6962 compliant)
-- Digital Signatures (Ed25519)
-- External Anchor simulation
+- Merkle tree with RFC 6962 hash prefixes and final-leaf padding
+- SHA-512 demo signature fields (not Ed25519)
+- Synthetic anchor metadata (no external submission)
 
 Document ID: VSO-POC-GEN-002
 License: CC BY 4.0 International
@@ -32,7 +34,7 @@ import struct
 
 class Ed25519Simulator:
     """
-    Ed25519 signature simulator for demonstration purposes.
+    Legacy-named SHA-512 signature simulator; not an Ed25519 implementation.
     In production, use a proper cryptographic library (e.g., PyNaCl, cryptography).
     """
     
@@ -57,7 +59,7 @@ class Ed25519Simulator:
 
 class MerkleTree:
     """
-    RFC 6962 compliant Merkle Tree implementation.
+    PoC Merkle tree with RFC 6962 hash prefixes and final-leaf padding.
     
     Uses domain separation:
     - Leaf nodes: SHA256(0x00 || data)
@@ -82,7 +84,7 @@ class MerkleTree:
     def _build_tree(self):
         """
         Build the Merkle tree from leaves.
-        RFC 6962 compliant: pads to power of 2 for consistent proof lengths.
+        Pads to a power of two; this is not the RFC 6962 tree algorithm.
         """
         if not self.leaves:
             self.root = b'\x00' * 32
@@ -120,7 +122,7 @@ class MerkleTree:
         return self.root.hex()
     
     def get_proof(self, index: int) -> List[Dict[str, str]]:
-        """Generate inclusion proof for leaf at index (RFC 6962 compliant)"""
+        """Generate a path in this PoC padded tree."""
         proof = []
         idx = index
         
@@ -224,7 +226,7 @@ class AnchorRecord:
 
 def canonicalize_json(obj: Any) -> str:
     """
-    RFC 8785 JSON Canonicalization Scheme (JCS) - simplified implementation.
+    Simplified sorted-key JSON serialization, not a full RFC 8785 implementation.
     Sorts keys and uses minimal whitespace.
     """
     return json.dumps(obj, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
@@ -253,7 +255,7 @@ def calculate_event_hash(header: dict, payload: dict, vcp_xref: dict,
 
 
 def generate_uuid_v7(timestamp_ns: int, counter: int) -> str:
-    """Generate UUIDv7 format identifier"""
+    """Generate a legacy demo identifier (not a valid UUID)."""
     timestamp_ms = timestamp_ns // 1_000_000
     
     # UUIDv7 format: timestamp_ms (48 bits) + version (4 bits) + random (12 bits) + 
@@ -270,7 +272,7 @@ def generate_uuid_v7(timestamp_ns: int, counter: int) -> str:
 
 class VCPEventGenerator:
     """
-    VCP v1.1 Compliant Event Generator
+    VCP v1.1 PoC Event Generator
     """
     
     def __init__(self, party_role: str, party_id: str, counterparty_id: str,
@@ -310,7 +312,7 @@ class VCPEventGenerator:
                      symbol: str, account_id: str, order_id: str,
                      xref_id: str, payload: dict,
                      reconciliation_status: str = "PENDING") -> dict:
-        """Create a VCP v1.1 compliant event"""
+        """Create an illustrative PoC event targeting VCP v1.1."""
         
         self.event_counter += 1
         event_id = generate_uuid_v7(timestamp_ns, self.event_counter)
@@ -733,11 +735,11 @@ def generate_trading_scenario() -> Tuple[List[dict], List[dict], dict, dict]:
 
 
 def main():
-    """Generate VCP v1.1 compliant sample events"""
+    """Generate PoC sample events; no conformance claim."""
     from pathlib import Path
     
     print("=" * 60)
-    print("VCP v1.1 Compliant Event Generator")
+    print("VCP v1.1 PoC Event Generator")
     print("=" * 60)
     print()
     
@@ -777,7 +779,7 @@ def main():
     
     print()
     print("=" * 60)
-    print("VCP v1.1 Compliance Summary")
+    print("VCP v1.1 PoC Generation Summary (not conformance)")
     print("=" * 60)
     print()
     print("Layer 1 - Event Integrity:")
@@ -785,14 +787,14 @@ def main():
     print(f"  ✓ PrevHash (hash chain): Enabled")
     print()
     print("Layer 2 - Collection Integrity:")
-    print(f"  ✓ Merkle Tree (RFC 6962): Built")
+    print(f"  ✓ PoC Merkle tree: RFC 6962 hash prefixes, final-leaf padding")
     print(f"  ✓ Merkle Root (Trader):   {trader_anchor['merkle_root'][:32]}...")
     print(f"  ✓ Merkle Root (PropFirm): {propfirm_anchor['merkle_root'][:32]}...")
     print(f"  ✓ Merkle Proofs: Included in each event")
     print()
-    print("Layer 3 - External Verifiability:")
-    print(f"  ✓ Digital Signatures (Ed25519): All events signed")
-    print(f"  ✓ External Anchor: OpenTimestamps (simulated)")
+    print("Layer 3 - Demo Signature / Anchor Metadata:")
+    print(f"  • Signature fields: SHA-512 simulator, not Ed25519")
+    print(f"  • Anchor fields: synthetic ots- string; no external submission")
     print(f"  ✓ Policy Identification: Included")
     print()
     print("VCP-XREF Dual Logging:")
@@ -800,7 +802,9 @@ def main():
     print(f"  ✓ PartyRole: INITIATOR/COUNTERPARTY")
     print(f"  ✓ ReconciliationStatus: Tracked")
     print()
-    print("Files are ready for verification!")
+    print("Sample files written. Run the PoC checks; this is not a conformance result.")
+    print("Demo signature generation and verification differ; the committed samples report 0/23 prefix matches per party.")
+    print("Generated IDs are not valid UUIDs; no external signature or timestamp proof is established.")
 
 
 if __name__ == "__main__":

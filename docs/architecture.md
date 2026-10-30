@@ -5,9 +5,11 @@
 **Date**: 2025-01-12  
 **Status**: PoC (status corrected 2026-10-25; see the README)
 
+> **Implementation scope:** This document includes design targets, not conformance results. The current code uses a SHA-512 signature simulator and a different public-key-prefix checker (0/23 matches per party in the committed samples), synthetic anchors, malformed UUID-like IDs, simplified sorted-key JSON, and a padded Merkle tree with RFC 6962 hash prefixes. It does not authenticate signatures or verify external timestamp proofs. See the [README status correction](../README.md) for the current limits and CLI exit-status scope.
+
 ## 1. Executive Summary
 
-This document describes the architecture of the VCP v1.1 Payout Dispute Resolution Proof of Concept. The PoC demonstrates how the VeritasChain Protocol v1.1 Three-Layer Architecture provides cryptographically verifiable records for resolving trading disputes between traders and prop firms.
+This document describes the architecture of the VCP v1.1 Payout Dispute Resolution Proof of Concept. The PoC explores the VeritasChain Protocol v1.1 Three-Layer Architecture and demonstrates selected consistency checks between trader and prop-firm sample logs. It does not establish authentic trade execution or resolve disputes.
 
 ## 2. VCP v1.1 Three-Layer Architecture
 
@@ -87,9 +89,9 @@ VCP-XREF enables **Dual Logging**—independent VCP event streams from multiple 
                   │   Verification      │
                   └─────────────────────┘
 
-Property:  Unless both parties collude, 
-           omission or modification by one party 
-           is detectable by the other.
+PoC scope: Compare supplied records for selected mismatches.
+           No collusion-resistance or complete detection
+           guarantee is established by this demo.
 ```
 
 ### 3.2 Cross-Reference Protocol
@@ -247,7 +249,7 @@ def calculate_event_hash(header, payload, vcp_xref, policy_id, prev_hash=None):
     return hashlib.sha256(hash_input).hexdigest()
 ```
 
-### 5.2 Merkle Tree (Layer 2 - RFC 6962)
+### 5.2 PoC Merkle Tree (RFC 6962 Hash Prefixes)
 
 ```python
 def merkle_leaf_hash(data: bytes) -> bytes:
@@ -259,9 +261,11 @@ def merkle_node_hash(left: bytes, right: bytes) -> bytes:
     return hashlib.sha256(b'\x01' + left + right).digest()
 ```
 
-Domain separation (0x00 for leaves, 0x01 for internal nodes) prevents second preimage attacks.
+The PoC uses separate leaf and internal-node hash prefixes. Its generator duplicates the final leaf to pad the tree to a power of two; this is not the RFC 6962 tree algorithm. The verifier checks supplied proof paths against stored event hashes and skips missing proofs.
 
-### 5.3 External Anchor (Layer 3)
+### 5.3 Synthetic Anchor Metadata (Layer 3 Placeholder)
+
+The following structure is illustrative. The `ots-` proof string is locally generated, not an OpenTimestamps proof. The verifier only compares the anchor record root string with the first event root; it does not check the anchor signature, timestamp, or external proof.
 
 ```json
 {
@@ -284,6 +288,8 @@ Domain separation (0x00 for leaves, 0x01 for internal nodes) prevents second pre
 ```
 
 ## 6. Verification Process
+
+The flow below is a design outline. In the current CLI, demo signature counts and anchor metadata do not affect the exit status. Missing Merkle proofs are skipped; an absent anchor file leaves the anchor flag true. A zero exit status covers only event-hash failures, supplied Merkle-path/root-consistency failures, and critical cross-reference discrepancies. Hash-chain flags, policy checks, and warnings also do not determine that status.
 
 ### 6.1 Three-Layer Verification
 
@@ -316,12 +322,12 @@ Domain separation (0x00 for leaves, 0x01 for internal nodes) prevents second pre
 │  STEP 3: Layer 3 - External Verifiability                          │
 │  ─────────────────────────────────────────                          │
 │  For each event:                                                    │
-│    1. Verify digital signature                                      │
+│    1. Count demo public-key-prefix matches (not authentication)       │
 │    2. Check anchor_reference exists                                 │
 │  For batch:                                                         │
 │    3. Verify anchor record merkle_root matches                      │
 │                                                                     │
-│  Result: VALID | INVALID (signature failure = unauthorized change) │
+│  Result: Demo counts / root metadata only; no external verification  │
 │                                                                     │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
@@ -347,30 +353,30 @@ Domain separation (0x00 for leaves, 0x01 for internal nodes) prevents second pre
 
 ## 7. Security Analysis
 
-### 7.1 Threat Model
+### 7.1 Threat Model and PoC Limitations
 
-| Threat | Mitigation |
+| Threat | PoC behavior / limitation |
 |--------|------------|
-| **Single-party log modification** | Counterparty log provides independent evidence |
+| **Single-party log modification** | Some content and cross-reference mismatches can be reported; authenticity of either log is not established |
 | **Hash collision attack** | SHA-256 provides 128-bit security |
-| **Signature forgery** | Ed25519 provides 128-bit security |
-| **Merkle proof manipulation** | RFC 6962 domain separation prevents attacks |
-| **Post-hoc timestamp manipulation** | External anchor proves existence at specific time |
-| **Collusion between parties** | External anchor remains independent |
+| **Signature forgery** | Not protected by this demo: its prefix check is publicly computable and is not Ed25519 |
+| **Merkle proof manipulation** | Supplied paths are checked against stored hashes; missing paths and batch completeness are not validated |
+| **Post-hoc timestamp manipulation** | Synthetic anchors establish no independently verified time |
+| **Collusion between parties** | No independent anchor or collusion-resistance is demonstrated |
 
 ### 7.2 Attack Scenarios and Defenses
 
 **Scenario 1: PropFirm modifies execution price**
 - Layer 1 detection: EventHash mismatch
-- Layer 2 detection: Merkle proof invalid
+- Layer 2 behavior in `tamper_demo.py`: no new failure; the stored event hash and its proof remain unchanged
 - VCP-XREF detection: Price discrepancy with trader log
 
 **Scenario 2: PropFirm deletes an event**
-- Layer 2 detection: Merkle tree leaf count mismatch
+- Layer 2 limitation: the verifier does not recompute batch completeness or check the leaf count
 - VCP-XREF detection: Missing cross-reference from one party
 
 **Scenario 3: PropFirm creates fake event**
-- Layer 3 detection: Signature cannot be created without private key
+- Layer 3 limitation: the demo prefix check is publicly computable and does not authenticate the event
 - VCP-XREF detection: No matching event in trader log
 
 ## 8. Implementation Notes
@@ -408,19 +414,19 @@ scripts/
 | Merkle proof verification | O(log n) | Proof path length |
 | Cross-reference matching | O(n) | Linear scan with index |
 
-## 9. Compliance Mapping
+## 9. Design Target Mapping
 
-### 9.1 VCP v1.1 Specification Compliance
+### 9.1 VCP v1.1 Targets (Not Conformance Results)
 
 | VCP Section | Requirement | Implementation |
 |-------------|-------------|----------------|
 | 5.5 | Policy Identification | `policy_identification` object in each event |
 | 5.6 | VCP-XREF | `vcp_xref` object with cross-reference ID |
-| 6.0 | Three-Layer Architecture | Separate verification for each layer |
-| 6.1 | EventHash | SHA-256 of canonical JSON |
-| 6.2 | Merkle Tree | RFC 6962 with domain separation |
-| 6.3 | External Anchor | Anchor record with merkle_root |
-| 6.4 | Security Object | All required fields present |
+| 6.0 | Three-Layer Architecture | Separate PoC checks and Layer 3 placeholders |
+| 6.1 | EventHash | SHA-256 of simplified sorted-key JSON components |
+| 6.2 | Merkle Tree | RFC 6962 hash prefixes with final-leaf padding |
+| 6.3 | External Anchor | Synthetic anchor metadata; root-string comparison only |
+| 6.4 | Security Object | Sample fields present; no conformance established |
 
 ### 9.2 Standards References
 
@@ -439,9 +445,9 @@ scripts/
 4. **REST API** - Web service for verification
 5. **Real-time streaming** - Kafka/Redis for live event capture
 
-### 10.2 Conformance Tier Upgrades
+### 10.2 Illustrative Tier Targets (No Tier Validated)
 
-| Current (Silver) | Gold Upgrade | Platinum Upgrade |
+| Silver Target | Gold Target | Platinum Target |
 |------------------|--------------|------------------|
 | BEST_EFFORT clock | NTP_SYNCED | PTP_LOCKED |
 | 24h anchor | 1h anchor | 10min anchor |

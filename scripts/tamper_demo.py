@@ -3,13 +3,14 @@
 VCP v1.1 Tamper Demonstration Script
 =====================================
 
-Demonstrates what happens when a prop firm attempts to modify 
-execution records after the fact in a VCP v1.1 environment.
+Edits one execution price in a PoC sample log targeting VCP v1.1.
+The stored event hash, Merkle proof, and demo signature remain unchanged.
 
-This script shows how the Three-Layer Architecture detects tampering:
-- Layer 1: Event hash mismatch
-- Layer 2: Merkle proof invalidation  
-- Layer 3: Signature verification failure
+Expected verifier results for this edit:
+- Layer 1: Recomputed event hash mismatch
+- Layer 2: No new failure; paths use the unchanged stored event hash
+- Layer 3: Demo prefix counts unchanged, no external proof verification
+- VCP-XREF: Execution-price discrepancy
 
 Usage:
     python tamper_demo.py
@@ -57,13 +58,13 @@ def main():
         VCP v1.1 TAMPER DEMONSTRATION
 {'='*70}{Colors.END}
 
-This demonstration shows what happens when a prop firm 
-attempts to modify execution records in a VCP v1.1 environment.
+This PoC edits a sample execution price without updating its stored hash.
 
-{Colors.CYAN}VCP v1.1 Three-Layer Architecture detects tampering at multiple levels:{Colors.END}
-  • Layer 1: EventHash recalculation fails
-  • Layer 2: Merkle proof becomes invalid
-  • Layer 3: Digital signature verification fails
+{Colors.CYAN}Expected results from the current PoC verifier:{Colors.END}
+  • Layer 1: Recomputed EventHash differs
+  • Layer 2: Stored-hash Merkle paths remain unchanged
+  • Layer 3: Demo prefix counts unchanged; no external proof verification
+  • VCP-XREF: Changed price differs from the trader sample
 
 {Colors.YELLOW}Scenario: PropFirm changes execution price from 2658.20 to 2655.50
           to claim worse fill and reduce trader's profit by $2.70/oz.{Colors.END}
@@ -159,34 +160,35 @@ attempts to modify execution records in a VCP v1.1 environment.
     print(f"  {Colors.RED}→ Verifier detects: EVENT_HASH_MISMATCH{Colors.END}")
     print()
     
-    print(f"{Colors.MAGENTA}{Colors.BOLD}Layer 2: Collection Integrity - BROKEN{Colors.END}")
-    print(f"  {Colors.DIM}(Merkle Tree, RFC 6962){Colors.END}")
+    print(f"{Colors.MAGENTA}{Colors.BOLD}Layer 2: PoC Merkle Checks - UNCHANGED{Colors.END}")
+    print(f"  {Colors.DIM}(Padded-tree paths checked against stored event hashes){Colors.END}")
     print()
-    print(f"  The Merkle proof was computed for the original EventHash.")
-    print(f"  With a different hash, the proof no longer validates to the root.")
+    print(f"  The stored EventHash and its Merkle proof were not changed.")
+    print(f"  The verifier uses that stored hash, so this path still matches the root.")
     print()
     print(f"    Merkle Root:      {security['merkle_root'][:40]}...")
     print(f"    Proof Path:       {len(security['merkle_proof'])} steps")
-    print(f"    {Colors.RED}Verification:     FAILED - Computed root differs{Colors.END}")
+    print(f"    {Colors.YELLOW}Expected result:  No new Merkle failure from this edit{Colors.END}")
     print()
-    print(f"  {Colors.RED}→ Verifier detects: MERKLE_PROOF_INVALID{Colors.END}")
+    print(f"  {Colors.YELLOW}→ Recomputed content-hash failure is detected separately in Layer 1{Colors.END}")
     print()
     
-    print(f"{Colors.MAGENTA}{Colors.BOLD}Layer 3: External Verifiability - BROKEN{Colors.END}")
-    print(f"  {Colors.DIM}(Digital Signature, External Anchor){Colors.END}")
+    print(f"{Colors.MAGENTA}{Colors.BOLD}Layer 3: Demo Metadata - NO EXTERNAL VERIFICATION{Colors.END}")
+    print(f"  {Colors.DIM}(SHA-512 demo prefix check and synthetic anchor metadata){Colors.END}")
     print()
-    print(f"  The signature was created over the original EventHash.")
-    print(f"  It cannot be valid for any different content.")
+    print(f"  The demo signature check uses the unchanged stored EventHash.")
+    print(f"  It is not Ed25519 and does not authenticate event content.")
+    print(f"  The committed samples report 0/23 prefix matches per party before and after this edit.")
     print()
     print(f"    Signature:        {security['signature'][:40]}...")
     print(f"    Public Key:       {security['public_key'][:40]}...")
-    print(f"    {Colors.RED}Verification:     FAILED - Signature invalid{Colors.END}")
+    print(f"    {Colors.YELLOW}Verification:     No cryptographic signature authentication{Colors.END}")
     print()
-    print(f"  Additionally, the External Anchor (OpenTimestamps) proves")
-    print(f"  the original Merkle Root existed at anchor time.")
+    print(f"  Anchor metadata is synthetic; the verifier only compares stored roots.")
+    print(f"  No OpenTimestamps submission or timestamp-proof validation occurs.")
     print()
     print(f"    Anchor ID:        {security['anchor_reference']}")
-    print(f"    {Colors.RED}→ Original data is independently timestamped{Colors.END}")
+    print(f"    {Colors.YELLOW}→ No independent timestamp is established by this demo{Colors.END}")
     print()
     
     # Save tampered file
@@ -202,7 +204,7 @@ attempts to modify execution records in a VCP v1.1 environment.
     print(f"        VCP-XREF CROSS-REFERENCE IMPACT")
     print(f"{'='*70}{Colors.END}")
     print()
-    print(f"  The Trader's independent VCP log still contains the ORIGINAL price.")
+    print(f"  The separate trader sample still contains the ORIGINAL price.")
     print(f"  Cross-reference verification will detect the discrepancy:")
     print()
     print(f"    CrossReferenceID: {target_event['vcp_xref']['cross_reference_id']}")
@@ -227,16 +229,16 @@ Now run the verifier to detect the tampering:
     --propfirm evidence/propfirm_tampered.jsonl \\
     --anchor evidence/anchor_records.json{Colors.END}
 
-The VCP v1.1 verifier will detect:
+The PoC verifier will report:
 
-  {Colors.RED}Layer 1:{Colors.END} Event hash mismatch (content tampered)
-  {Colors.RED}Layer 2:{Colors.END} Merkle proof invalid (collection integrity broken)
+  {Colors.RED}Layer 1:{Colors.END} Recomputed event hash mismatch
+  {Colors.YELLOW}Layer 2:{Colors.END} No new Merkle failure (stored hash unchanged)
   {Colors.RED}VCP-XREF:{Colors.END} execution_price discrepancy
      - Trader logged:   {original_price}
      - PropFirm logged: {new_price}
 
-{Colors.BOLD}These discrepancies are detectable by the checks above (PoC; demo signatures).{Colors.END}
-{Colors.BOLD}Manipulation requires collusion between BOTH parties AND anchor compromise.{Colors.END}
+{Colors.BOLD}These sample-log inconsistencies are detected by the selected PoC checks.{Colors.END}
+{Colors.BOLD}This demo does not establish authentic signatures, independent timestamps, or a dispute outcome.{Colors.END}
 """)
 
 
