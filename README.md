@@ -3,8 +3,8 @@
 > - This is first-party proof-of-concept code by VeritasChain Co., Ltd., which operates the VeritasChain Standards Organization (VSO). It targets VCP v1.1. VCP v1.1 has no tagged release and is superseded by VCP v1.2 (Released, tag `v1.2.0`).
 > - Conformance to any VCP tier, or to VAP, has not been independently established. There are zero external implementations of VAP or any of its profiles, including VCP.
 > - Not certified. VSO does not issue certifications itself. The certification scheme requires a Conformity Assessment Body (CAB) independent of the scheme owner; the only registered CAB, VeritasChain Co., Ltd., is not independent (VAP v1.2 ERRATA E-2026-10-21).
-> - Known limitations: signatures come from an Ed25519 *simulator* in `scripts/generate_events_v1_1.py` (a SHA-512 construction its own docstring calls "NOT cryptographically secure - demo only"); `verify.py` instead compares a publicly computable SHA-512 prefix derived from the public key and stored event hash; this differs from the generator and is not Ed25519 verification. The committed samples report 0/23 matching demo signatures for each party. The anchor "proof" is a synthetic string (`ots-` plus a truncated SHA-256 of the root and timestamp); nothing is submitted to OpenTimestamps. `verify.py` checks the anchor by comparing the anchor record's `merkle_root` string with the events' `merkle_root`; it does not verify an anchor signature or proof. The Merkle tree pads to a power of two by duplicating the last leaf (RFC 6962 hash prefixes, not the RFC 6962 tree algorithm). The generated event IDs are not valid UUIDs.
-> - The CLI exit status covers event-hash failures, supplied Merkle-path/root-consistency failures, and critical cross-reference discrepancies. It does not include signature results, anchor metadata, hash-chain flags, policy checks, or warnings. Missing Merkle proofs are skipped; an absent anchor file leaves the anchor flag true. JSON field names ending in `_valid` are legacy PoC result names, not conformance or authentication claims.
+> - Known limitations: signatures come from an Ed25519 *simulator* in `scripts/generate_events_v1_1.py` (a SHA-512 construction its own docstring calls "NOT cryptographically secure - demo only"); `verify.py` instead compares a publicly computable SHA-512 prefix derived from the public key and stored event hash; this differs from the generator and is not Ed25519 verification. The committed samples report 0/23 matching demo tags for each party. The anchor "proof" is a synthetic string (`ots-` plus a truncated SHA-256 of the root and timestamp); nothing is submitted to OpenTimestamps. `verify.py` checks the anchor by comparing the anchor record's `merkle_root` string with the events' `merkle_root`; it does not verify an anchor signature or proof. The Merkle tree pads to a power of two by duplicating the last leaf (RFC 6962 hash prefixes, not the RFC 6962 tree algorithm). The generated event IDs are not valid UUIDs.
+> - The CLI exit status covers event-hash failures, supplied Merkle-path/root-consistency failures, and critical cross-reference discrepancies. It does not include demo-tag counts, anchor metadata, hash-chain flags, policy checks, or warnings. Missing Merkle proofs are skipped; an absent anchor file leaves the anchor flag true. JSON field names ending in `_valid` are legacy PoC result names, not conformance or authentication claims.
 > - The results below show selected consistency checks on the sample logs. They are not proof of what was traded, and they do not settle disputes on their own. The `evidence/` files and `VCP_WorldFirst_Final_Report.md` are preserved historical artifacts; this notice states the current verification scope.
 
 # VCP v1.1 Payout Dispute Resolution PoC
@@ -124,9 +124,10 @@ Layer 2: PoC Merkle Checks
   ✓ Trader Merkle checks:    NO FAILURE REPORTED
   ✓ PropFirm Merkle checks:  NO FAILURE REPORTED
 
-Layer 3: Demo Signature / Anchor Metadata Checks
-  ⚠ Trader demo signatures:     0/23 prefix matches
-  ⚠ PropFirm demo signatures:   0/23 prefix matches
+Layer 3: Demo Tag / Anchor Metadata Checks
+  ⚠ Signature verification: NOT_IMPLEMENTED
+  Trader demo tags:   0/23 prefix matches (not authentication)
+  PropFirm demo tags: 0/23 prefix matches (not authentication)
   ✓ Trader anchor-root mismatch:   NOT DETECTED
   ✓ PropFirm anchor-root mismatch: NOT DETECTED
   No external signature or timestamp proof is verified.
@@ -136,6 +137,21 @@ VCP-XREF: Cross-Reference Verification
 
 PoC result: selected consistency checks only; no signature authentication or external proof verification.
 ```
+
+### Machine-readable output correction — 2 November 2026
+
+The publicly computable prefix check is now named `demo_tag_match`. JSON output
+uses `layer3.trader_demo_tag_matches` and `layer3.propfirm_demo_tag_matches`.
+The misleading `trader_signatures_valid` and `propfirm_signatures_valid` fields
+have been removed; consumers must update to the demo-tag names. Both JSON and
+human-readable output state `signature_verification: NOT_IMPLEMENTED`, even
+when every prefix matches. A match is possible using only the public key and
+stored event hash and does not authenticate any signer. The historical
+`security.signature` input fields and all committed evidence bytes are preserved.
+
+The JSON `result_scope` is `SELECTED_POC_CONSISTENCY_CHECKS`. A zero exit status
+keeps the limited scope described above and is not a successful signature check.
+Run the semantic regressions with `python -m unittest discover -s tests -v`.
 
 ### 3. Demonstrate Tamper Detection
 
@@ -164,7 +180,7 @@ Layer 1: Event Integrity
 These sample-log inconsistencies are detected by the selected PoC checks.
 ```
 
-The demo changes the payload but leaves the stored event hash unchanged. The verifier detects a recomputed-hash mismatch and a price discrepancy; its Merkle checks still pass because they use the unchanged stored hash. Demo signature results remain 0/23 for both parties.
+The demo changes the payload but leaves the stored event hash unchanged. The verifier detects a recomputed-hash mismatch and a price discrepancy; its Merkle checks still pass because they use the unchanged stored hash. Demo-tag matches remain 0/23 for both parties; signature verification remains `NOT_IMPLEMENTED`.
 
 ## Repository Structure
 
@@ -314,3 +330,7 @@ This PoC is released under [CC-BY-4.0](LICENSE).
 *This repository is a technical demonstration. It does not constitute legal, trading, or compliance advice.*
 
 *Built by [VeritasChain Standards Organization](https://veritaschain.org) — Verify, Don't Trust.*
+
+## License scope clarification — 2 November 2026
+
+Documentation remains CC BY 4.0. First-party code, scripts, code examples and schemas additionally offer [Apache-2.0](LICENSE-CODE); existing licenses and third-party notices remain in effect. See [LICENSE](LICENSE) for the scope and preserved prior terms. This editorial licensing note does not change protocol requirements or claim conformance.

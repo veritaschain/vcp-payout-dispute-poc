@@ -289,7 +289,7 @@ The following structure is illustrative. The `ots-` proof string is locally gene
 
 ## 6. Verification Process
 
-The flow below is a design outline. In the current CLI, demo signature counts and anchor metadata do not affect the exit status. Missing Merkle proofs are skipped; an absent anchor file leaves the anchor flag true. A zero exit status covers only event-hash failures, supplied Merkle-path/root-consistency failures, and critical cross-reference discrepancies. Hash-chain flags, policy checks, and warnings also do not determine that status.
+The flow below is a design outline. The CLI reports `signature_verification: NOT_IMPLEMENTED`; a public demo-tag prefix match does not authenticate a signer. In the current CLI, demo-tag counts and anchor metadata do not affect the exit status. Missing Merkle proofs are skipped; an absent anchor file leaves the anchor flag true. A zero exit status covers only event-hash failures, supplied Merkle-path/root-consistency failures, and critical cross-reference discrepancies. Hash-chain flags, policy checks, and warnings also do not determine that status.
 
 ### 6.1 Three-Layer Verification
 
