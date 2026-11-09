@@ -1,3 +1,12 @@
+> **Historical research notice — 10 November 2026**
+>
+> This first-party, AI-assisted research document is retained as a historical record.
+> Its "world's first", independence and confidence claims do not establish an independent
+> assessment and must not be used as current priority, conformance or certification claims.
+> The original title, status labels, dates and text are preserved below. The printed
+> "January 12, 2025" date is unverified; this notice does not infer a replacement date.
+> See the [current implementation limits](README.md) before interpreting the historical conclusions.
+
 # VCP Payout Dispute PoC: Consolidated "World's First" Claim Verification Report
 
 **Document ID**: VSO-NOVELTY-002  
