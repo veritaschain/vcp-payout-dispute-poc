@@ -13,8 +13,10 @@ Features:
 - VCP-XREF: Cross-reference matching and discrepancy detection
 - Policy Identification: Presence checks, not tier conformance
 
-Exit status covers event-hash failures, Merkle-check failures, and critical
-cross-reference discrepancies only. It excludes demo-tag counts, anchor
+Exit 0 requires two nonempty, unambiguous, fully paired supplied logs and
+completed local hash/Merkle checks. Exit 1 covers malformed event input or a
+selected contradiction; exit 2 covers unavailable or incomplete comparison.
+It excludes demo-tag counts, anchor
 metadata, hash-chain flags, policy checks, and warnings. JSON result names
 ending in _valid retain their legacy PoC meaning; they do not imply conformance.
 Signature verification is always reported as NOT_IMPLEMENTED.
@@ -32,11 +34,13 @@ import json
 import sys
 import hashlib
 import base64
+import math
+import re
+from collections import Counter
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
 
 
 # =============================================================================
@@ -70,6 +74,90 @@ class VerificationLayer(Enum):
     LAYER2_COLLECTION = "Layer 2: Collection Integrity"
     LAYER3_EXTERNAL = "Layer 3: External Verifiability"
     XREF = "VCP-XREF: Cross-Reference"
+
+
+class InputError(ValueError):
+    """Fixed input diagnostic without input contents or filesystem paths."""
+    def __init__(self, code: str, *, unavailable: bool = False,
+                 party: str = "", line: Optional[int] = None):
+        super().__init__(code)
+        self.code, self.unavailable, self.party, self.line = code, unavailable, party, line
+
+
+def _unique_members(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate_member")
+        value[key] = item
+    return value
+
+
+def _reject_constant(_value):
+    raise ValueError("nonfinite_number")
+
+
+def _finite_float(value):
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("nonfinite_number")
+    return number
+
+
+def _parse_json(raw):
+    return json.loads(raw, object_pairs_hook=_unique_members,
+                      parse_constant=_reject_constant, parse_float=_finite_float)
+
+
+def _event_shape(data):
+    """Validate the local checker's inputs, not a normative VCP schema."""
+    if type(data) is not dict:
+        raise ValueError("event_object_required")
+    for name in ('header', 'payload', 'vcp_xref', 'policy_identification', 'security'):
+        if type(data.get(name, {})) is not dict:
+            raise ValueError("event_component_shape")
+    header, xref, security = (data.get(name, {}) for name in ('header', 'vcp_xref', 'security'))
+    for value in (header.get('event_id'), header.get('event_type'), xref.get('cross_reference_id')):
+        if type(value) is not str or not value:
+            raise ValueError("comparison_identity_required")
+    timestamp = header.get('timestamp_int')
+    if not ((type(timestamp) is int and timestamp >= 0) or
+            (type(timestamp) is str and re.fullmatch(r'[0-9]+', timestamp))):
+        raise ValueError("timestamp_shape")
+    shared = xref.get('shared_event_key', {})
+    if type(shared) is not dict:
+        raise ValueError("shared_event_key_shape")
+    tolerance = shared.get('tolerance_ms', 100)
+    if type(tolerance) is not int or not 0 <= tolerance <= 9007199254740991:
+        raise ValueError("tolerance_shape")
+    if type(data.get('payload', {}).get('trade_data', {})) is not dict:
+        raise ValueError("trade_data_shape")
+    for source, fields in (
+            (header, ('trace_id', 'timestamp_iso', 'symbol', 'account_id')),
+            (xref, ('party_role', 'counterparty_id', 'reconciliation_status')),
+            (shared, ('order_id',)),
+            (data.get('policy_identification', {}), ('policy_id', 'conformance_tier', 'version')),
+            (security, ('prev_hash', 'hash_algo', 'signature', 'sign_algo', 'public_key',
+                        'merkle_root', 'anchor_reference'))):
+        if any(name in source and type(source[name]) is not str for name in fields):
+            raise ValueError("event_label_shape")
+    if not isinstance(security.get('event_hash'), str) or not re.fullmatch(r'[0-9a-f]{64}', security['event_hash']):
+        raise ValueError("event_hash_shape")
+    for name in ('prev_hash', 'merkle_root'):
+        value = security.get(name, '')
+        if value and re.fullmatch(r'[0-9a-f]{64}', value) is None:
+            raise ValueError("stored_hash_shape")
+    proof = security.get('merkle_proof')
+    if proof is not None:
+        if type(proof) is not list:
+            raise ValueError("merkle_proof_shape")
+        for step in proof:
+            if (type(step) is not dict or set(step) != {'hash', 'position'} or
+                    type(step['hash']) is not str or re.fullmatch(r'[0-9a-f]{64}', step['hash']) is None or
+                    step['position'] not in ('left', 'right')):
+                raise ValueError("merkle_step_shape")
+    # Preserve finite JSON values, but reject text that cannot be encoded as UTF-8.
+    canonicalize_json(data).encode('utf-8')
 
 
 @dataclass
@@ -107,7 +195,7 @@ class VCPEvent:
     public_key: str
     merkle_root: str
     merkle_index: int
-    merkle_proof: List[Dict]
+    merkle_proof: Optional[List[Dict]]
     anchor_reference: str
     
     # Raw data for hash recalculation
@@ -115,6 +203,7 @@ class VCPEvent:
     
     @classmethod
     def from_json(cls, data: Dict[str, Any]) -> 'VCPEvent':
+        _event_shape(data)
         header = data.get('header', {})
         vcp_xref = data.get('vcp_xref', {})
         policy = data.get('policy_identification', {})
@@ -150,7 +239,7 @@ class VCPEvent:
             public_key=security.get('public_key', ''),
             merkle_root=security.get('merkle_root', ''),
             merkle_index=security.get('merkle_index', 0),
-            merkle_proof=security.get('merkle_proof', []),
+            merkle_proof=security.get('merkle_proof'),
             anchor_reference=security.get('anchor_reference', ''),
             
             raw=data
@@ -195,12 +284,12 @@ class VerificationResult:
     trader_hashes_invalid: int
     propfirm_hashes_valid: int
     propfirm_hashes_invalid: int
-    trader_chain_valid: bool
-    propfirm_chain_valid: bool
+    trader_chain_valid: Optional[bool]
+    propfirm_chain_valid: Optional[bool]
     
     # Layer 2 results
-    trader_merkle_valid: bool
-    propfirm_merkle_valid: bool
+    trader_merkle_valid: Optional[bool]
+    propfirm_merkle_valid: Optional[bool]
     trader_merkle_root: str
     propfirm_merkle_root: str
     
@@ -208,16 +297,17 @@ class VerificationResult:
     trader_demo_tag_matches: int
     propfirm_demo_tag_matches: int
     signature_verification: str
-    trader_anchor_valid: bool
-    propfirm_anchor_valid: bool
+    trader_anchor_valid: Optional[bool]
+    propfirm_anchor_valid: Optional[bool]
     
     # Policy verification
-    trader_policy_valid: bool
-    propfirm_policy_valid: bool
+    trader_policy_valid: Optional[bool]
+    propfirm_policy_valid: Optional[bool]
     
     # Issues and discrepancies
     issues: List[VerificationIssue]
     discrepancies: List[Discrepancy]
+    anchor_input_error: Optional[str] = None
 
 
 # =============================================================================
@@ -226,7 +316,7 @@ class VerificationResult:
 
 def canonicalize_json(obj: Any) -> str:
     """Simplified sorted-key JSON, not a full RFC 8785 implementation."""
-    return json.dumps(obj, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+    return json.dumps(obj, sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False)
 
 
 def recalculate_event_hash(event: VCPEvent) -> str:
@@ -298,37 +388,46 @@ def verify_merkle_proof(event_hash: str, merkle_root: str,
 # Verification Functions
 # =============================================================================
 
-def load_events(filepath: str) -> List[VCPEvent]:
-    """Load VCP v1.1 events from JSONL file"""
+def load_events(filepath: str, party: str = "") -> List[VCPEvent]:
+    """Read all supplied JSONL records; never silently omit an invalid line."""
     events = []
-    with open(filepath, 'r') as f:
-        for line_num, line in enumerate(f, 1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                data = json.loads(line)
-                events.append(VCPEvent.from_json(data))
-            except json.JSONDecodeError as e:
-                print(f"{Colors.YELLOW}Warning: Invalid JSON line {line_num}: {e}{Colors.END}")
+    line_num = None
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            for line_num, line in enumerate(f, 1):
+                if line.strip():
+                    events.append(VCPEvent.from_json(_parse_json(line)))
+    except OSError as exc:
+        raise InputError('EVENT_INPUT_UNAVAILABLE', unavailable=True, party=party) from exc
+    except (ValueError, TypeError, RecursionError, OverflowError) as exc:
+        raise InputError('EVENT_INPUT_INVALID', party=party, line=line_num) from exc
     return events
 
 
 def load_anchor_records(filepath: str) -> Dict:
-    """Load anchor records from JSON file"""
+    """Load optional root metadata; this is not external-proof verification."""
     try:
-        with open(filepath, 'r') as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+        with open(filepath, 'r', encoding='utf-8') as f:
+            value = _parse_json(f.read())
+        if type(value) is not dict:
+            raise ValueError('anchor_shape')
+        for name in ('trader_anchor', 'propfirm_anchor'):
+            anchor = value.get(name, {})
+            if type(anchor) is not dict or ('merkle_root' in anchor and type(anchor['merkle_root']) is not str):
+                raise ValueError('anchor_shape')
+        return value
+    except OSError as exc:
+        raise InputError('ANCHOR_INPUT_UNAVAILABLE', unavailable=True, party='anchor') from exc
+    except (ValueError, TypeError, RecursionError, OverflowError) as exc:
+        raise InputError('ANCHOR_INPUT_INVALID', party='anchor') from exc
 
 
-def verify_layer1_event_integrity(events: List[VCPEvent], party: str) -> Tuple[int, int, bool, List[VerificationIssue]]:
+def verify_layer1_event_integrity(events: List[VCPEvent], party: str) -> Tuple[int, int, Optional[bool], List[VerificationIssue]]:
     """Layer 1: Verify event integrity"""
     issues = []
     valid_hashes = 0
     invalid_hashes = 0
-    chain_valid = True
+    chain_valid = True if events else None
     
     for i, event in enumerate(events):
         recalculated = recalculate_event_hash(event)
@@ -363,17 +462,17 @@ def verify_layer1_event_integrity(events: List[VCPEvent], party: str) -> Tuple[i
     return valid_hashes, invalid_hashes, chain_valid, issues
 
 
-def verify_layer2_collection_integrity(events: List[VCPEvent], party: str) -> Tuple[bool, str, List[VerificationIssue]]:
+def verify_layer2_collection_integrity(events: List[VCPEvent], party: str) -> Tuple[Optional[bool], str, List[VerificationIssue]]:
     """Layer 2: Verify collection integrity"""
     issues = []
     if not events:
-        return True, "", issues
+        return None, "", issues
     
-    merkle_root = events[0].merkle_root
+    merkle_root = next((event.merkle_root for event in events if event.merkle_root), '')
     merkle_valid = True
     
     for event in events:
-        if event.merkle_root != merkle_root:
+        if event.merkle_root and event.merkle_root != merkle_root:
             merkle_valid = False
             issues.append(VerificationIssue(
                 layer=VerificationLayer.LAYER2_COLLECTION,
@@ -385,7 +484,10 @@ def verify_layer2_collection_integrity(events: List[VCPEvent], party: str) -> Tu
                 actual=event.merkle_root[:32] + "..."
             ))
         
-        if event.merkle_proof:
+        if event.merkle_proof is None or not event.merkle_root:
+            if merkle_valid is not False:
+                merkle_valid = None
+        else:
             if not verify_merkle_proof(event.event_hash, merkle_root, 
                                        event.merkle_index, event.merkle_proof):
                 merkle_valid = False
@@ -402,11 +504,11 @@ def verify_layer2_collection_integrity(events: List[VCPEvent], party: str) -> Tu
     return merkle_valid, merkle_root, issues
 
 
-def verify_layer3_external(events: List[VCPEvent], anchor: Dict, party: str) -> Tuple[int, bool, List[VerificationIssue]]:
+def verify_layer3_external(events: List[VCPEvent], anchor: Dict, party: str) -> Tuple[int, Optional[bool], List[VerificationIssue]]:
     """Count demo prefix matches and compare optional anchor-root metadata."""
     issues = []
     demo_tag_matches = 0
-    anchor_valid = True
+    anchor_valid = None
     
     for event in events:
         # The legacy evidence field is called "signature". Its bytes are kept
@@ -425,7 +527,8 @@ def verify_layer3_external(events: List[VCPEvent], anchor: Dict, party: str) -> 
                 actual="<empty>"
             ))
     
-    if anchor and events:
+    if anchor.get('merkle_root') and events:
+        anchor_valid = True
         if anchor.get('merkle_root') != events[0].merkle_root:
             anchor_valid = False
             issues.append(VerificationIssue(
@@ -441,10 +544,10 @@ def verify_layer3_external(events: List[VCPEvent], anchor: Dict, party: str) -> 
     return demo_tag_matches, anchor_valid, issues
 
 
-def verify_policy_identification(events: List[VCPEvent], party: str) -> Tuple[bool, List[VerificationIssue]]:
+def verify_policy_identification(events: List[VCPEvent], party: str) -> Tuple[Optional[bool], List[VerificationIssue]]:
     """Verify Policy Identification per VCP v1.1 Section 5.5"""
     issues = []
-    policy_valid = True
+    policy_valid = True if events else None
     
     for event in events:
         if not event.policy_id:
@@ -486,6 +589,8 @@ def extract_comparable_fields(event: VCPEvent) -> Dict[str, str]:
 def match_and_compare_events(trader_events: List[VCPEvent], 
                              propfirm_events: List[VCPEvent]) -> Tuple[int, List[Discrepancy]]:
     """Match events by CrossReferenceID and compare for discrepancies"""
+    trader_counts = Counter((event.xref_id, event.event_type) for event in trader_events)
+    propfirm_counts = Counter((event.xref_id, event.event_type) for event in propfirm_events)
     propfirm_index: Dict[Tuple[str, str], VCPEvent] = {}
     for event in propfirm_events:
         key = (event.xref_id, event.event_type)
@@ -498,7 +603,7 @@ def match_and_compare_events(trader_events: List[VCPEvent],
     
     for trader_event in trader_events:
         key = (trader_event.xref_id, trader_event.event_type)
-        if key not in propfirm_index:
+        if trader_counts[key] != 1 or propfirm_counts[key] != 1:
             continue
         
         propfirm_event = propfirm_index[key]
@@ -542,7 +647,7 @@ def match_and_compare_events(trader_events: List[VCPEvent],
                 propfirm_value=propfirm_event.timestamp_iso,
                 severity=Severity.WARNING,
                 event_type=trader_event.event_type,
-                message=f"Timestamp diff ({time_diff_ns/1_000_000:.1f}ms) exceeds 2x tolerance"
+                message=f"Timestamp diff ({time_diff_ns // 1_000_000}.{time_diff_ns % 1_000_000 // 100_000}ms) exceeds 2x tolerance"
             ))
     
     return matched_count, discrepancies
@@ -552,12 +657,16 @@ def verify_logs(trader_file: str, propfirm_file: str,
                 anchor_file: Optional[str] = None) -> VerificationResult:
     """Main verification function for VCP v1.1 logs"""
     
-    trader_events = load_events(trader_file)
-    propfirm_events = load_events(propfirm_file)
+    trader_events = load_events(trader_file, 'trader')
+    propfirm_events = load_events(propfirm_file, 'propfirm')
     
     anchors = {}
-    if anchor_file and Path(anchor_file).exists():
-        anchors = load_anchor_records(anchor_file)
+    anchor_input_error = None
+    if anchor_file:
+        try:
+            anchors = load_anchor_records(anchor_file)
+        except InputError as error:
+            anchor_input_error = error.code
     
     all_issues = []
     
@@ -607,17 +716,42 @@ def verify_logs(trader_file: str, propfirm_file: str,
         trader_policy_valid=t_policy,
         propfirm_policy_valid=p_policy,
         issues=all_issues,
-        discrepancies=discrepancies
+        discrepancies=discrepancies,
+        anchor_input_error=anchor_input_error
     )
+
+
+def comparison_complete(result: VerificationResult) -> bool:
+    return bool(result.trader_events and result.propfirm_events and
+                result.matched_pairs == result.trader_events == result.propfirm_events and
+                result.trader_merkle_valid is not None and result.propfirm_merkle_valid is not None)
+
+
+def comparison_status(result: VerificationResult) -> str:
+    """Known selected contradictions take priority over missing comparisons."""
+    if (result.trader_hashes_invalid or result.propfirm_hashes_invalid or
+            result.trader_merkle_valid is False or result.propfirm_merkle_valid is False or
+            any(d.severity == Severity.CRITICAL for d in result.discrepancies)):
+        return 'MISMATCH'
+    if not comparison_complete(result):
+        return 'INDETERMINATE'
+    return 'MATCH'
 
 
 def print_result(result: VerificationResult, verbose: bool = False):
     """Print verification results with colors"""
+    status = comparison_status(result)
+
+    def display(value, match='MATCH', failed='FAILED'):
+        if value is None:
+            return f"{Colors.YELLOW}⚠{Colors.END}", 'NOT_CHECKED / UNAVAILABLE'
+        return (f"{Colors.GREEN}✓{Colors.END}", match) if value else (f"{Colors.RED}✗{Colors.END}", failed)
     
     print()
     print(f"{Colors.BOLD}{'='*70}{Colors.END}")
     print(f"{Colors.BOLD}        VCP v1.1 PAYOUT DISPUTE PoC CHECKS{Colors.END}")
     print(f"{Colors.BOLD}{'='*70}{Colors.END}")
+    print(f"PoC comparison: {status}")
     print()
     
     # Layer 1
@@ -625,29 +759,29 @@ def print_result(result: VerificationResult, verbose: bool = False):
     print(f"  {Colors.DIM}(EventHash, PrevHash){Colors.END}")
     print()
     
-    t_hash_ok = result.trader_hashes_invalid == 0
-    p_hash_ok = result.propfirm_hashes_invalid == 0
-    
-    icon = f"{Colors.GREEN}✓{Colors.END}" if t_hash_ok else f"{Colors.RED}✗{Colors.END}"
-    print(f"  {icon} Trader event hashes:   {result.trader_hashes_valid}/{result.trader_events} valid")
-    icon = f"{Colors.GREEN}✓{Colors.END}" if p_hash_ok else f"{Colors.RED}✗{Colors.END}"
-    print(f"  {icon} PropFirm event hashes: {result.propfirm_hashes_valid}/{result.propfirm_events} valid")
-    icon = f"{Colors.GREEN}✓{Colors.END}" if result.trader_chain_valid else f"{Colors.YELLOW}⚠{Colors.END}"
-    print(f"  {icon} Trader hash chain:     {'VALID' if result.trader_chain_valid else 'BROKEN'}")
-    icon = f"{Colors.GREEN}✓{Colors.END}" if result.propfirm_chain_valid else f"{Colors.YELLOW}⚠{Colors.END}"
-    print(f"  {icon} PropFirm hash chain:   {'VALID' if result.propfirm_chain_valid else 'BROKEN'}")
+    t_hash_ok = result.trader_hashes_invalid == 0 if result.trader_events else None
+    p_hash_ok = result.propfirm_hashes_invalid == 0 if result.propfirm_events else None
+
+    icon, label = display(t_hash_ok)
+    print(f"  {icon} Trader event hashes:   {result.trader_hashes_valid}/{result.trader_events}; {label}")
+    icon, label = display(p_hash_ok)
+    print(f"  {icon} PropFirm event hashes: {result.propfirm_hashes_valid}/{result.propfirm_events}; {label}")
+    icon, label = display(result.trader_chain_valid)
+    print(f"  {icon} Trader hash chain:     {label}")
+    icon, label = display(result.propfirm_chain_valid)
+    print(f"  {icon} PropFirm hash chain:   {label}")
     print()
     
     # Layer 2
     print(f"{Colors.CYAN}{Colors.BOLD}Layer 2: PoC Merkle Checks{Colors.END}")
-    print(f"  {Colors.DIM}(Supplied padded-tree paths and stored roots; missing proofs are skipped){Colors.END}")
+    print(f"  {Colors.DIM}(Supplied padded-tree paths and stored roots; missing proofs remain unknown){Colors.END}")
     print()
-    icon = f"{Colors.GREEN}✓{Colors.END}" if result.trader_merkle_valid else f"{Colors.RED}✗{Colors.END}"
-    print(f"  {icon} Trader Merkle checks:    {'NO FAILURE REPORTED' if result.trader_merkle_valid else 'FAILED'}")
+    icon, label = display(result.trader_merkle_valid)
+    print(f"  {icon} Trader Merkle checks:    {label}")
     if result.trader_merkle_root:
         print(f"      Root: {result.trader_merkle_root[:48]}...")
-    icon = f"{Colors.GREEN}✓{Colors.END}" if result.propfirm_merkle_valid else f"{Colors.RED}✗{Colors.END}"
-    print(f"  {icon} PropFirm Merkle checks:  {'NO FAILURE REPORTED' if result.propfirm_merkle_valid else 'FAILED'}")
+    icon, label = display(result.propfirm_merkle_valid)
+    print(f"  {icon} PropFirm Merkle checks:  {label}")
     if result.propfirm_merkle_root:
         print(f"      Root: {result.propfirm_merkle_root[:48]}...")
     print()
@@ -659,11 +793,12 @@ def print_result(result: VerificationResult, verbose: bool = False):
     print(f"  {Colors.YELLOW}⚠ Signature verification: {result.signature_verification}{Colors.END}")
     print(f"  Trader demo tags:   {result.trader_demo_tag_matches}/{result.trader_events} prefix matches (not authentication)")
     print(f"  PropFirm demo tags: {result.propfirm_demo_tag_matches}/{result.propfirm_events} prefix matches (not authentication)")
-    icon = f"{Colors.GREEN}✓{Colors.END}" if result.trader_anchor_valid else f"{Colors.YELLOW}⚠{Colors.END}"
-    print(f"  {icon} Trader anchor-root mismatch:   {'NOT DETECTED' if result.trader_anchor_valid else 'DETECTED'}")
-    icon = f"{Colors.GREEN}✓{Colors.END}" if result.propfirm_anchor_valid else f"{Colors.YELLOW}⚠{Colors.END}"
-    print(f"  {icon} PropFirm anchor-root mismatch: {'NOT DETECTED' if result.propfirm_anchor_valid else 'DETECTED'}")
-    print("  Missing anchor records also leave the mismatch flag unset.")
+    icon, label = display(result.trader_anchor_valid)
+    print(f"  {icon} Trader anchor-root comparison:   {label}")
+    icon, label = display(result.propfirm_anchor_valid)
+    print(f"  {icon} PropFirm anchor-root comparison: {label}")
+    if result.anchor_input_error:
+        print(f"  Optional anchor metadata: {result.anchor_input_error}")
     print("  No external signature or timestamp proof is verified.")
     print()
     
@@ -674,6 +809,8 @@ def print_result(result: VerificationResult, verbose: bool = False):
     print(f"  Trader events:    {result.trader_events}")
     print(f"  PropFirm events:  {result.propfirm_events}")
     print(f"  Matched pairs:    {result.matched_pairs}")
+    print(f"  Trader events without an unambiguous match:   {result.trader_events - result.matched_pairs}")
+    print(f"  PropFirm events without an unambiguous match: {result.propfirm_events - result.matched_pairs}")
     print()
     
     # Discrepancies
@@ -696,6 +833,8 @@ def print_result(result: VerificationResult, verbose: bool = False):
                 if verbose:
                     print(f"      ├─ Trader:   {d.trader_value}")
                     print(f"      └─ PropFirm: {d.propfirm_value}")
+    elif not comparison_complete(result):
+        print(f"{Colors.YELLOW}{Colors.BOLD}⚠ COMPARISON INCOMPLETE{Colors.END}")
     else:
         print(f"{Colors.GREEN}{Colors.BOLD}✓ NO DISCREPANCIES DETECTED{Colors.END}")
     print()
@@ -705,17 +844,9 @@ def print_result(result: VerificationResult, verbose: bool = False):
     print(f"{Colors.BOLD}                         SUMMARY{Colors.END}")
     print(f"{Colors.BOLD}{'='*70}{Colors.END}")
     
-    all_valid = (
-        result.trader_hashes_invalid == 0 and
-        result.propfirm_hashes_invalid == 0 and
-        result.trader_merkle_valid and
-        result.propfirm_merkle_valid and
-        len(critical) == 0
-    )
-    
-    if all_valid:
+    if status == 'MATCH':
         print(f"""
-{Colors.GREEN}No failures reported by the PoC exit-status checks.{Colors.END}
+{Colors.GREEN}MATCH: selected local checks completed for all supplied pairs.{Colors.END}
 
 These checks cover event hashes, supplied Merkle paths/root consistency,
 and critical cross-reference discrepancies.
@@ -724,13 +855,21 @@ do not determine the exit status. Review the individual results above.
 
 {Colors.BOLD}PoC result: selected consistency checks only; no signature authentication or external proof verification.{Colors.END}
 """)
+    elif status == 'INDETERMINATE':
+        print(f"""
+{Colors.YELLOW}INDETERMINATE: the supplied comparison is incomplete.{Colors.END}
+At least one log is empty, a cross-reference lacks an unambiguous counterpart,
+or a required local Merkle check could not be completed. No successful comparison
+is asserted. Optional anchor metadata is assessed separately.
+PoC result: selected consistency checks only; no signature authentication or external proof verification.
+""")
     else:
         print(f"""
 {Colors.RED}Selected PoC checks FAILED.{Colors.END}
 
 Issues detected:
   • Event hash failures:    {result.trader_hashes_invalid + result.propfirm_hashes_invalid}
-  • Merkle check failures:  {int(not result.trader_merkle_valid) + int(not result.propfirm_merkle_valid)}
+  • Merkle check failures:  {int(result.trader_merkle_valid is False) + int(result.propfirm_merkle_valid is False)}
   • Critical discrepancies: {len(critical)}
 
 {Colors.BOLD}These sample-log inconsistencies are detected by the selected PoC checks.{Colors.END}
@@ -739,7 +878,7 @@ do not determine the exit status. No attribution or non-repudiation is establish
 """)
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Selected checks for VCP v1.1 PoC sample logs (not conformance)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -749,6 +888,7 @@ PoC check scope:
   - Policy metadata presence and selected cross-reference fields
   - Public demo-tag-prefix counts and optional anchor-root comparison
   - Signature verification: NOT_IMPLEMENTED; no external timestamp-proof verification
+  - Exit 0: nonempty fully paired local match; 1: invalid/mismatch; 2: unavailable/incomplete
   - Exit status excludes demo-tag, anchor, hash-chain, policy, and warning results
 
 Examples:
@@ -765,24 +905,38 @@ For more information: https://veritaschain.org
     parser.add_argument('-v', '--verbose', action='store_true', help='Show all details')
     parser.add_argument('--json', action='store_true', help='Output selected PoC checks and capability limits as JSON (not conformance)')
     
-    args = parser.parse_args()
-    
-    if not Path(args.trader).exists():
-        print(f"{Colors.RED}Error: Trader file not found: {args.trader}{Colors.END}")
-        sys.exit(1)
-    if not Path(args.propfirm).exists():
-        print(f"{Colors.RED}Error: PropFirm file not found: {args.propfirm}{Colors.END}")
-        sys.exit(1)
-    
-    result = verify_logs(args.trader, args.propfirm, args.anchor)
+    args = parser.parse_args(argv)
+    try:
+        result = verify_logs(args.trader, args.propfirm, args.anchor)
+    except InputError as error:
+        status = 'INDETERMINATE' if error.unavailable else 'INVALID_INPUT'
+        output = {
+            'vcp_version': '1.1', 'result_scope': 'SELECTED_POC_CONSISTENCY_CHECKS',
+            'comparison_status': status, 'comparison_completed': False,
+            'input_error': {'code': error.code, 'party': error.party, 'line': error.line},
+            'layer3': {'signature_verification': 'NOT_IMPLEMENTED'},
+        }
+        if args.json:
+            print(json.dumps(output, indent=2))
+        else:
+            print(f"PoC comparison: {status}\nNo comparison completed: {error.code}")
+        print(error.code, file=sys.stderr)
+        return 2 if error.unavailable else 1
+    status = comparison_status(result)
     
     if args.json:
         output = {
             'vcp_version': '1.1',
             'result_scope': 'SELECTED_POC_CONSISTENCY_CHECKS',
+            'comparison_status': status,
+            'comparison_completed': comparison_complete(result),
             'trader_events': result.trader_events,
             'propfirm_events': result.propfirm_events,
             'matched_pairs': result.matched_pairs,
+            'unmatched_or_ambiguous': {
+                'trader_events': result.trader_events - result.matched_pairs,
+                'propfirm_events': result.propfirm_events - result.matched_pairs,
+            },
             'layer1': {
                 'trader_hashes_valid': result.trader_hashes_valid,
                 'propfirm_hashes_valid': result.propfirm_hashes_valid,
@@ -796,7 +950,10 @@ For more information: https://veritaschain.org
             'layer3': {
                 'trader_demo_tag_matches': result.trader_demo_tag_matches,
                 'propfirm_demo_tag_matches': result.propfirm_demo_tag_matches,
-                'signature_verification': result.signature_verification
+                'signature_verification': result.signature_verification,
+                'trader_anchor_root_match': result.trader_anchor_valid,
+                'propfirm_anchor_root_match': result.propfirm_anchor_valid,
+                'anchor_input_error': result.anchor_input_error,
             },
             'discrepancies': [
                 {
@@ -815,16 +972,8 @@ For more information: https://veritaschain.org
     else:
         print_result(result, args.verbose)
     
-    critical = [d for d in result.discrepancies if d.severity == Severity.CRITICAL]
-    has_failures = (
-        result.trader_hashes_invalid > 0 or
-        result.propfirm_hashes_invalid > 0 or
-        not result.trader_merkle_valid or
-        not result.propfirm_merkle_valid or
-        len(critical) > 0
-    )
-    sys.exit(1 if has_failures else 0)
+    return {'MATCH': 0, 'MISMATCH': 1, 'INDETERMINATE': 2}[status]
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

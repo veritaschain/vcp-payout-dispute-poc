@@ -4,7 +4,7 @@
 > - Conformance to any VCP tier, or to VAP, has not been independently established. There are zero external implementations of VAP or any of its profiles, including VCP.
 > - Not certified. VSO does not issue certifications itself. The certification scheme requires a Conformity Assessment Body (CAB) independent of the scheme owner; the only registered CAB, VeritasChain Co., Ltd., is not independent (VAP v1.2 ERRATA E-2026-10-21).
 > - Known limitations: signatures come from an Ed25519 *simulator* in `scripts/generate_events_v1_1.py` (a SHA-512 construction its own docstring calls "NOT cryptographically secure - demo only"); `verify.py` instead compares a publicly computable SHA-512 prefix derived from the public key and stored event hash; this differs from the generator and is not Ed25519 verification. The committed samples report 0/23 matching demo tags for each party. The anchor "proof" is a synthetic string (`ots-` plus a truncated SHA-256 of the root and timestamp); nothing is submitted to OpenTimestamps. `verify.py` checks the anchor by comparing the anchor record's `merkle_root` string with the events' `merkle_root`; it does not verify an anchor signature or proof. The Merkle tree pads to a power of two by duplicating the last leaf (RFC 6962 hash prefixes, not the RFC 6962 tree algorithm). The generated event IDs are not valid UUIDs.
-> - The CLI exit status covers event-hash failures, supplied Merkle-path/root-consistency failures, and critical cross-reference discrepancies. It does not include demo-tag counts, anchor metadata, hash-chain flags, policy checks, or warnings. Missing Merkle proofs are skipped; an absent anchor file leaves the anchor flag true. JSON field names ending in `_valid` are legacy PoC result names, not conformance or authentication claims.
+> - The CLI's current input/comparison semantics are described in the 15 November 2026 correction below. Empty, incomplete or ambiguous comparisons no longer exit successfully; malformed event input is not skipped. Demo-tag counts, optional anchor metadata, hash-chain flags, policy checks and warnings remain outside the selected comparison verdict. JSON field names ending in `_valid` are legacy PoC result names, not conformance or authentication claims; unavailable checks now use `null`.
 > - The results below show selected consistency checks on the sample logs. They are not proof of what was traded, and they do not settle disputes on their own. The `evidence/` files and `VCP_WorldFirst_Final_Report.md` are preserved historical artifacts; this notice states the current verification scope.
 
 # VCP v1.1 Payout Dispute Resolution PoC
@@ -117,19 +117,19 @@ python verifier/verify.py \
 Abbreviated output for the committed samples:
 ```
 Layer 1: Event Integrity
-  ✓ Trader event hashes:   23/23 valid
-  ✓ PropFirm event hashes: 23/23 valid
+  ✓ Trader event hashes:   23/23; MATCH
+  ✓ PropFirm event hashes: 23/23; MATCH
 
 Layer 2: PoC Merkle Checks
-  ✓ Trader Merkle checks:    NO FAILURE REPORTED
-  ✓ PropFirm Merkle checks:  NO FAILURE REPORTED
+  ✓ Trader Merkle checks:    MATCH
+  ✓ PropFirm Merkle checks:  MATCH
 
 Layer 3: Demo Tag / Anchor Metadata Checks
   ⚠ Signature verification: NOT_IMPLEMENTED
   Trader demo tags:   0/23 prefix matches (not authentication)
   PropFirm demo tags: 0/23 prefix matches (not authentication)
-  ✓ Trader anchor-root mismatch:   NOT DETECTED
-  ✓ PropFirm anchor-root mismatch: NOT DETECTED
+  ✓ Trader anchor-root comparison:   MATCH
+  ✓ PropFirm anchor-root comparison: MATCH
   No external signature or timestamp proof is verified.
 
 VCP-XREF: Cross-Reference Verification
@@ -152,6 +152,41 @@ stored event hash and does not authenticate any signer. The historical
 The JSON `result_scope` is `SELECTED_POC_CONSISTENCY_CHECKS`. A zero exit status
 keeps the limited scope described above and is not a successful signature check.
 Run the semantic regressions with `python -m unittest discover -s tests -v`.
+
+### Input and incomplete-comparison correction — 15 November 2026
+
+The CLI previously exited `0` for two empty files, discarded malformed JSONL
+lines, and could report no discrepancies while one party's record had no
+counterpart. Repeated cross-reference keys could overwrite or reuse a record.
+These cases now remain distinct from a completed local comparison.
+
+| Exit | `comparison_status` | Meaning |
+| --- | --- | --- |
+| `0` | `MATCH` | Both supplied logs are nonempty, every event has exactly one counterpart by cross-reference ID and event type, and the selected local hash/Merkle checks match. |
+| `1` | `MISMATCH` | A selected event-hash, supplied Merkle/root, or critical field contradiction was found. |
+| `1` | `INVALID_INPUT` | An event file contains malformed JSON, duplicate object members, nonfinite numbers, invalid UTF-8, or an unsupported local record shape. No partial file is reported as successfully checked. |
+| `2` | `INDETERMINATE` | An event file is unavailable, either log is empty, a counterpart is missing/ambiguous, or Merkle material is unavailable. Invalid command usage also exits `2`. |
+
+`comparison_completed` records whether all supplied events had unambiguous
+counterparts and available Merkle checks. An established `MISMATCH` keeps exit
+`1` even when another part is incomplete; its `comparison_completed` can be
+`false`. `unmatched_or_ambiguous` counts supplied events without one unambiguous
+counterpart in each direction. It does not identify which party is correct or
+prove that either supplied history is complete. Two matching truncated logs
+can still pass these local checks.
+
+Missing Merkle material yields `null`, not `true`. A supplied empty proof list
+is checked as an actual single-leaf path. Missing or unusable optional anchor
+metadata yields `null` in `layer3.trader_anchor_root_match` and
+`layer3.propfirm_anchor_root_match`; `anchor_input_error` records a fixed error
+code when a selected anchor file cannot be used. This optional metadata remains
+outside the comparison exit status and does not establish an external anchor.
+
+Input errors produce one JSON object under `--json` and a fixed diagnostic on
+stderr, without a traceback or an input path. Blank lines between valid JSONL
+records remain accepted. The event admission checks are local parser/checker
+requirements, not a normative VCP schema. Existing finite JSON hash encoding,
+demo-tag behavior and all historical evidence/report bytes remain unchanged.
 
 ### 3. Demonstrate Tamper Detection
 
