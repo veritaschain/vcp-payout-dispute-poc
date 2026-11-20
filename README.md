@@ -342,7 +342,7 @@ python verifier/verify.py -t evidence/trader_events.jsonl -p evidence/propfirm_e
 ## Related Resources
 
 - [VCP Specification v1.1](https://github.com/veritaschain/vcp-spec)
-- [VCP-XREF Dual Logging Guide](https://veritaschain.org/docs/xref)
+- [VCP-XREF dual logging — VCP v1.1 specification, Section 5.6](https://github.com/veritaschain/vcp-spec/blob/main/spec/v1.1/VCP-Specification-v1_1_en.md)
 - [VeritasChain Standards Organization](https://veritaschain.org)
 - [IETF Draft: draft-kamimura-scitt-vcp](https://datatracker.ietf.org/doc/draft-kamimura-scitt-vcp/)
 
